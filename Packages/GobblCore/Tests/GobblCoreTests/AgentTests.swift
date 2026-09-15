@@ -103,6 +103,24 @@ import Testing
         #expect(t.apply(ev(.turnDone("ok")), now: t0) == .none)
     }
 
+    @Test func legacyCodexNotifyCheersEveryTurn() {
+        // Legacy notify sends only turnDone; a later turn must still cheer.
+        var t = AgentTracker()
+        let done = { AgentEvent(source: .codex, sessionID: "codex:/src/x", cwd: "/src/x", kind: .turnDone($0)) }
+        #expect(t.apply(done("one"), now: t0) == .done("one"))
+        #expect(t.apply(done("one"), now: t0.addingTimeInterval(1)) == .none)
+        #expect(t.apply(done("two"), now: t0.addingTimeInterval(90)) == .done("two"))
+    }
+
+    @Test func stopReasonOnlyEndsGrokSessions() {
+        #expect(AgentEvent.parse(source: .codex, json: Data(#"{"hook_event_name":"Stop","session_id":"s","reason":"other"}"#.utf8))?.kind
+                == .turnDone(nil))
+        #expect(AgentEvent.parse(source: .claude, json: Data(#"{"hook_event_name":"Stop","session_id":"s","reason":"other"}"#.utf8))?.kind
+                == .turnDone(nil))
+        #expect(AgentEvent.parse(source: .grok, json: Data(#"{"hook_event_name":"Stop","sessionId":"s","reason":"shutdown"}"#.utf8))?.kind
+                == .sessionEnd)
+    }
+
     @Test func thinkingVersusCoding() {
         var t = AgentTracker()
         #expect(t.activity == .idle)

@@ -77,7 +77,8 @@ public struct AgentEvent: Equatable, Sendable {
                 }
             case "Stop":
                 // Grok also fires Stop on session teardown; that isn't a finished task.
-                if let reason = str("reason"), reason != "end_turn" {
+                // Only Grok: Claude Code and Codex don't document a `reason`, so their Stop always cheers.
+                if resolvedSource(claimed: source, json: o) == .grok, let reason = str("reason"), reason != "end_turn" {
                     kind = .sessionEnd
                 } else {
                     kind = .turnDone(str("last_assistant_message", "lastAssistantMessage"))
@@ -160,6 +161,8 @@ public struct AgentTracker: Equatable, Sendable {
 
     public static let staleWorking: TimeInterval = 10 * 60
     public static let forgetDone: TimeInterval = 20 * 60
+    /// A second "done" this soon after the first is the same turn delivered twice.
+    public static let duplicateDone: TimeInterval = 5
 
     public private(set) var sessions: [AgentSession] = []
 
@@ -188,6 +191,7 @@ public struct AgentTracker: Equatable, Sendable {
             ?? AgentSession(id: e.sessionID, source: e.source, cwd: e.cwd, state: .idle, updated: now, started: now)
         sessions.removeAll { $0.id == e.sessionID }
         let wasWorking = s.isWorking
+        let previousUpdate = s.updated
         s.updated = now
         if e.source == .grok { s.source = .grok }
         if let cwd = e.cwd { s.cwd = cwd }
@@ -213,7 +217,9 @@ public struct AgentTracker: Equatable, Sendable {
             s.state = .waiting(message)
             effect = .needsYou(message)
         case .turnDone(let message):
-            if case .done = s.state { break }
+            // The same turn reported twice (Grok also runs Claude Code's hooks): cheer once. A later
+            // turn still cheers, even from legacy Codex notify, which sends nothing but turnDone.
+            if case .done = s.state, now.timeIntervalSince(previousUpdate) < Self.duplicateDone { break }
             s.state = .done(message)
             effect = .done(message)
         case .turnAborted:
