@@ -1,7 +1,7 @@
 import GobblCore
 import SwiftUI
 
-/// Claude Code and Codex sessions, and Allow/Deny for permission requests.
+/// Claude Code, Codex and Grok sessions, and Allow/Deny for permission requests.
 struct AgentsPanel: View {
     @State private var hub = AgentHub.shared
 
@@ -124,29 +124,57 @@ struct AgentIcon: View {
     let source: AgentEvent.Source
 
     var body: some View {
-        Image(systemName: source == .claude ? "asterisk" : "chevron.left.forwardslash.chevron.right")
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(source == .claude ? Color(hex: 0xE8825B) : Palette.text)
+        mark
             .frame(width: 26, height: 26)
             .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.08)))
+    }
+
+    @ViewBuilder
+    private var mark: some View {
+        switch source {
+        case .claude:
+            Image(systemName: "asterisk")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(Color(hex: 0xE8825B))
+        case .codex:
+            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(Palette.text)
+        case .grok:
+            GrokMark()
+                .stroke(Color.white, style: StrokeStyle(lineWidth: 1.55, lineCap: .round))
+                .frame(width: 12, height: 12)
+        }
+    }
+}
+
+/// Grok's logomark.
+struct GrokMark: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.addEllipse(in: rect.insetBy(dx: 1.1, dy: 1.1))
+        p.move(to: CGPoint(x: rect.minX + 0.6, y: rect.maxY - 1.4))
+        p.addLine(to: CGPoint(x: rect.maxX - 0.6, y: rect.minY + 1.4))
+        return p
     }
 }
 
 private struct EmptyAgents: View {
     @State private var claude = AgentLink.claudeStatus().connected
     @State private var codex = AgentLink.codexConnected()
+    @State private var grok = AgentLink.grokConnected()
 
     var body: some View {
         VStack(spacing: 6) {
             Image(systemName: "sparkles").font(.system(size: 18, weight: .semibold)).foregroundStyle(Palette.accent)
-            if claude || codex {
-                Text("Gob is watching \([claude ? "Claude Code" : nil, codex ? "Codex" : nil].compactMap { $0 }.joined(separator: " and ")).")
+            if claude || codex || grok {
+                Text("Gob is watching \(watching).")
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.text)
                 Text("Start a task and Gob works along, then cheers when it's done.")
                     .font(.system(size: 11)).foregroundStyle(Palette.textTertiary)
             } else {
                 Text("Let Gob cheer on your AI agents").font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.text)
-                Text("Connect Claude Code or Codex: Gob works along, cheers when a task finishes, and can approve prompts from the notch.")
+                Text("Connect Claude Code, Codex or Grok: Gob works along, cheers when a task finishes, and can approve prompts from the notch.")
                     .font(.system(size: 11)).foregroundStyle(Palette.textTertiary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 20)
@@ -155,5 +183,14 @@ private struct EmptyAgents: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var watching: String {
+        let names = [claude ? "Claude Code" : nil, codex ? "Codex" : nil, grok ? "Grok" : nil].compactMap { $0 }
+        switch names.count {
+        case 0, 1: return names.first ?? ""
+        case 2: return "\(names[0]) and \(names[1])"
+        default: return names.dropLast().joined(separator: ", ") + " and " + names.last!
+        }
     }
 }

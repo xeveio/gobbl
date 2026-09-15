@@ -1,25 +1,40 @@
 #!/usr/bin/perl
-# gobbl-agent: forwards Claude Code hook and Codex notify events to Gobbl.
+# gobbl-agent: forwards Claude Code, Codex and Grok hook events to Gobbl.
 #
-#   Claude Code hook:  /usr/bin/perl gobbl-agent claude     (event JSON on stdin)
-#   Codex notify:      /usr/bin/perl gobbl-agent codex JSON (event JSON as the last argument)
+#   Claude Code / Grok hook:  /usr/bin/perl gobbl-agent claude|grok   (event JSON on stdin)
+#   Codex hook:               /usr/bin/perl gobbl-agent codex        (event JSON on stdin)
+#   Legacy Codex notify:      /usr/bin/perl gobbl-agent codex JSON   (event JSON as the last argument)
 #
 # Sends "<source>\t<json>\n" to Gobbl's Unix socket. For a PermissionRequest
 # it waits for Gobbl's reply (the user clicking Allow/Deny in the notch) and
-# prints it for Claude Code. If Gobbl isn't running, or nobody answers in time,
-# it prints nothing and exits 0, so Claude Code simply asks in the terminal.
+# prints it for Claude Code or Codex. If Gobbl isn't running, or nobody answers
+# in time, it prints nothing and exits 0, so the agent asks in the terminal.
 # Part of Gobbl (MIT) — https://github.com/xeveio/gobbl
 use strict;
 use warnings;
 use Socket;
 
 my $source = shift @ARGV // 'claude';
+# Grok also runs Claude Code's hook file. If our own Grok hook is installed,
+# that copy will deliver the event — skip this Claude-compat one so Gob
+# doesn't cheer twice.
+my $from_grok = $ENV{GROK_SESSION_ID} || $ENV{GROK_HOOK_EVENT};
+if ($from_grok && $source eq 'claude') {
+    my $own = "$ENV{HOME}/.grok/hooks/gobbl.json";
+    if (open my $fh, '<', $own) {
+        local $/;
+        my $t = <$fh> // '';
+        close $fh;
+        exit 0 if $t =~ /gobbl-agent/;
+    }
+}
+$source = 'grok' if $from_grok;
 my $payload = '';
 if ($source eq 'codex' && @ARGV) {
     # Legacy Codex notify: the event JSON is the last argument.
     $payload = $ARGV[-1];
 } else {
-    # Hooks (Claude Code, and Codex): the event JSON is on stdin.
+    # Hooks (Claude Code, Codex, Grok): the event JSON is on stdin.
     local $/;
     $payload = <STDIN> // '';
 }

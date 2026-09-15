@@ -8,7 +8,7 @@ Free and open source, by [Xeve](https://xeve.io). Site: https://gobbl.xeve.io
 ## Features
 
 - **Pet:** Gob, a little computer with a face on its screen: Classic (late-70s), Compact (mid-80s) or Candy (late-90s). Arrives in a box (8 colours, 1 in 100 limited editions). Reacts to what you do: eats files through its slot, dances to music, sleeps when you're away, sweats when the CPU is pegged, fills its screen with Matrix rain while your AI agent codes and ponders while it thinks, types along when you type (opt-in), nudges you before meetings. Levels up, keeps a daily streak, earns 11 hats (4 seasonal). Shareable pet card and clips (see `docs/MASCOT.md`).
-- **AI agents:** connect Claude Code and Codex from Settings; Gob works along, cheers when a task finishes, and can Allow/Deny Claude's permission prompts from the notch (falls back to the terminal after 30 s).
+- **AI agents:** connect Claude Code, Codex and Grok from Settings; Gob works along, cheers when a task finishes, and can Allow/Deny Claude's permission prompts from the notch (falls back to the terminal after 30 s).
 - **Clips:** render 6-second scenes to MP4 + GIF, or record the real notch.
 - **Drop basket:** shake while dragging files to get a drop zone at the pointer.
 - **Shelf:** drop files on the notch; drag them out, AirDrop, share, Quick Look.

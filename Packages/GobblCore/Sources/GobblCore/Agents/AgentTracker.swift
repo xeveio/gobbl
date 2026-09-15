@@ -1,12 +1,18 @@
 import Foundation
 
-/// One message from an AI coding agent, decoded from a Claude Code or Codex
-/// hook payload (stdin JSON), or a legacy Codex `notify` payload (argv JSON).
+/// One message from an AI coding agent, decoded from a Claude Code, Codex or
+/// Grok hook payload (stdin JSON), or a legacy Codex `notify` payload (argv JSON).
 public struct AgentEvent: Equatable, Sendable {
     public enum Source: String, Sendable, CaseIterable {
-        case claude, codex
+        case claude, codex, grok
 
-        public var displayName: String { self == .claude ? "Claude Code" : "Codex" }
+        public var displayName: String {
+            switch self {
+            case .claude: "Claude Code"
+            case .codex: "Codex"
+            case .grok: "Grok"
+            }
+        }
     }
 
     public enum Kind: Equatable, Sendable {
@@ -20,6 +26,8 @@ public struct AgentEvent: Equatable, Sendable {
         /// A "needs you" notification: a permission prompt or a question.
         case needsInput(String)
         case turnDone(String?)
+        /// Turn ended without completing (interrupt, API error). No cheer.
+        case turnAborted
         case sessionEnd
     }
 
@@ -38,35 +46,69 @@ public struct AgentEvent: Equatable, Sendable {
     /// Returns nil for events Gob doesn't care about.
     public static func parse(source: Source, json: Data) -> AgentEvent? {
         guard let o = try? JSONSerialization.jsonObject(with: json) as? [String: Any] else { return nil }
-        func str(_ key: String) -> String? { (o[key] as? String).flatMap { $0.isEmpty ? nil : $0 } }
+        // Claude Code / Codex use snake_case; Grok uses camelCase and also sends
+        // Claude's `hook_event_name` alias. Accept both.
+        func str(_ keys: String...) -> String? {
+            for key in keys {
+                if let v = o[key] as? String, !v.isEmpty { return v }
+            }
+            return nil
+        }
         let cwd = str("cwd")
+        // Grok subagents have their own sessionId and often no parent-style Stop.
+        if str("subagentType", "subagent_type") != nil { return nil }
 
-        // Lifecycle hooks: Claude Code, and Codex, which uses the same payload.
-        if let event = str("hook_event_name") {
+        // Lifecycle hooks: Claude Code, Codex, and Grok (same events, mixed key styles).
+        if let event = hookEventName(str("hook_event_name") ?? str("hookEventName")) {
             let kind: Kind
             switch event {
             case "SessionStart": kind = .sessionStart
             case "UserPromptSubmit": kind = .promptSubmitted
-            case "PreToolUse": kind = .toolUse(str("tool_name") ?? "tool")
+            case "PreToolUse": kind = .toolUse(str("tool_name", "toolName") ?? "tool")
             case "PostToolUse": kind = .toolFinished
             case "PermissionRequest":
-                kind = .permissionRequest(tool: str("tool_name") ?? "a tool", detail: Self.detail(o["tool_input"]))
+                kind = .permissionRequest(tool: str("tool_name", "toolName") ?? "a tool",
+                                          detail: Self.detail(o["tool_input"] ?? o["toolInput"]))
             case "Notification":
-                switch str("notification_type") {
+                switch str("notification_type", "notificationType") {
                 case "permission_prompt": kind = .needsInput("Needs your permission")
                 case "elicitation_dialog", "elicitation_url_dialog", "agent_needs_input": kind = .needsInput("Has a question")
                 default: return nil // idle_prompt fires after a finished turn: nothing new to say
                 }
-            case "Stop": kind = .turnDone(str("last_assistant_message"))
+            case "Stop":
+                // Grok also fires Stop on session teardown; that isn't a finished task.
+                if let reason = str("reason"), reason != "end_turn" {
+                    kind = .sessionEnd
+                } else {
+                    kind = .turnDone(str("last_assistant_message", "lastAssistantMessage"))
+                }
+            case "StopFailure", "StopCancelled": kind = .turnAborted
             case "SessionEnd": kind = .sessionEnd
             default: return nil
             }
-            return AgentEvent(source: source, sessionID: str("session_id") ?? source.rawValue, cwd: cwd, kind: kind)
+            return AgentEvent(source: resolvedSource(claimed: source, json: o),
+                              sessionID: str("session_id", "sessionId") ?? source.rawValue, cwd: cwd, kind: kind)
         }
         // Legacy Codex notify: {"type":"agent-turn-complete","turn-id":…,"last-assistant-message":…,"cwd"?}
         guard source == .codex, str("type") == "agent-turn-complete" else { return nil }
         return AgentEvent(source: .codex, sessionID: "codex:\(cwd ?? "default")", cwd: cwd,
                           kind: .turnDone(str("last-assistant-message")))
+    }
+
+    /// Grok payloads include camelCase `hookEventName`; Claude Code and Codex do not.
+    static func resolvedSource(claimed: Source, json: [String: Any]) -> Source {
+        if claimed == .grok { return .grok }
+        if json["hookEventName"] != nil { return .grok }
+        return claimed
+    }
+
+    /// Claude sends PascalCase (`PreToolUse`). Grok's `hookEventName` is snake_case (`pre_tool_use`).
+    static func hookEventName(_ raw: String?) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        if raw.contains("_") {
+            return raw.split(separator: "_").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined()
+        }
+        return raw
     }
 
     /// The interesting part of a tool call: a command, a path, a URL.
@@ -147,6 +189,7 @@ public struct AgentTracker: Equatable, Sendable {
         sessions.removeAll { $0.id == e.sessionID }
         let wasWorking = s.isWorking
         s.updated = now
+        if e.source == .grok { s.source = .grok }
         if let cwd = e.cwd { s.cwd = cwd }
         var effect = Effect.none
         switch e.kind {
@@ -170,8 +213,11 @@ public struct AgentTracker: Equatable, Sendable {
             s.state = .waiting(message)
             effect = .needsYou(message)
         case .turnDone(let message):
+            if case .done = s.state { break }
             s.state = .done(message)
             effect = .done(message)
+        case .turnAborted:
+            s.state = .idle
         case .sessionEnd:
             break
         }

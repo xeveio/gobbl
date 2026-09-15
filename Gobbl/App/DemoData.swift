@@ -35,6 +35,7 @@ enum DemoData {
             AgentEvent(source: .claude, sessionID: "demo-1", cwd: "/Users/demo/gobbl", kind: .promptSubmitted),
             AgentEvent(source: .claude, sessionID: "demo-1", cwd: "/Users/demo/gobbl", kind: .toolUse("Edit")),
             AgentEvent(source: .codex, sessionID: "demo-2", cwd: "/Users/demo/website", kind: .turnDone("Deployed the new landing page")),
+            AgentEvent(source: .grok, sessionID: "demo-4", cwd: "/Users/demo/app", kind: .toolUse("run_terminal_command")),
             AgentEvent(source: .claude, sessionID: "demo-3", cwd: "/Users/demo/api", kind: .needsInput("Needs your permission")),
         ])
 

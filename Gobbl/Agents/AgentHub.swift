@@ -2,7 +2,7 @@ import AppKit
 import GobblCore
 import Observation
 
-/// Listens for Claude Code / Codex events from `gobbl-agent` on a Unix socket
+/// Listens for Claude Code / Codex / Grok events from `gobbl-agent` on a Unix socket
 /// and turns them into Gob's moods, notch HUDs, the Agents tab, and — when
 /// approvals are on — Allow/Deny prompts answered from the notch.
 @MainActor @Observable
@@ -117,8 +117,8 @@ final class AgentHub {
             MCPBridge.handle(String(parts[1]), reply: reply)
             return
         }
-        guard parts.count == 2, let source = AgentEvent.Source(rawValue: String(parts[0])),
-              let event = AgentEvent.parse(source: source, json: Data(parts[1].utf8)) else {
+        guard parts.count == 2, let claimed = AgentEvent.Source(rawValue: String(parts[0])),
+              let event = AgentEvent.parse(source: claimed, json: Data(parts[1].utf8)) else {
             reply.close()
             return
         }
@@ -126,10 +126,10 @@ final class AgentHub {
         let host = event.kind == .promptSubmitted ? NSWorkspace.shared.frontmostApplication?.bundleIdentifier : nil
         let activityBefore = tracker.activity
         let effect = tracker.apply(event, hostApp: host)
-        let project = tracker.sessions.first { $0.id == event.sessionID }?.project ?? source.displayName
+        let project = tracker.sessions.first { $0.id == event.sessionID }?.project ?? event.source.displayName
 
         if case .permissionRequest(let tool, let detail) = event.kind, UserDefaults.standard.bool(forKey: "agentApprovals") {
-            let prompt = PermissionPrompt(sessionID: event.sessionID, source: source, project: project, tool: tool,
+            let prompt = PermissionPrompt(sessionID: event.sessionID, source: event.source, project: project, tool: tool,
                                           detail: detail, created: Date(), reply: reply)
             pending.append(prompt)
             NotchController.shared.open(tab: .agents, focus: false)

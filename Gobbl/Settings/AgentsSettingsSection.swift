@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// Connect / disconnect Claude Code and Codex. Nothing is changed in their
+/// Connect / disconnect Claude Code, Codex and Grok. Nothing is changed in their
 /// config files until the user flips a switch here (or in onboarding).
 struct AgentsSettingsSection: View {
     @State private var claude = AgentLink.claudeStatus()
     @State private var codex = AgentLink.codexConnected()
+    @State private var grok = AgentLink.grokConnected()
     @State private var error: String?
 
     var body: some View {
@@ -32,10 +33,17 @@ struct AgentsSettingsSection: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            Toggle(isOn: Binding(get: { grok }, set: setGrok)) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Grok")
+                    Text(AgentLink.grokInstalled ? "Adds Gobbl hooks to ~/.grok/hooks/gobbl.json" : "Grok isn't set up on this Mac yet")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.caption)
             }
-            if claude.connected || codex {
+            if claude.connected || codex || grok {
                 Button("Send a Test Event") { AgentLink.sendTest() }
             }
         } header: {
@@ -65,6 +73,16 @@ struct AgentsSettingsSection: View {
             self.error = AgentLink.describe(error)
         }
         codex = AgentLink.codexConnected()
+    }
+
+    private func setGrok(_ on: Bool) {
+        do {
+            if on { try AgentLink.connectGrok() } else { try AgentLink.disconnectGrok() }
+            error = nil
+        } catch {
+            self.error = AgentLink.describe(error)
+        }
+        grok = AgentLink.grokConnected()
     }
 }
 

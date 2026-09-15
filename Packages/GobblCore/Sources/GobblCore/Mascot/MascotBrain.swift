@@ -4,7 +4,7 @@ import Foundation
 /// Rive state machine later — each case maps to one state).
 public enum Mood: String, Codable, CaseIterable, Sendable {
     case idle, curious, happy, love, eating, burping, dancing, sleepy, sleeping, alert, celebrating, dizzy
-    /// An AI agent (Claude Code, Codex) is running tools: Matrix rain on the screen.
+    /// An AI agent (Claude Code, Codex, Grok) is running tools: Matrix rain on the screen.
     case working
     /// An AI agent is reasoning: eyes up, eyebrow raised, a thought bubble.
     case thinking
@@ -54,7 +54,7 @@ public struct MascotStats: Codable, Equatable, Sendable {
     public var xp = 0
     /// Times music started while Gob was watching.
     public var songs = 0
-    /// Claude Code / Codex turns Gob saw finish.
+    /// Claude Code / Codex / Grok turns Gob saw finish.
     public var agentTasks = 0
     /// Consecutive days with Gobbl in use, and the best run.
     public var streak = 0

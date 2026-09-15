@@ -1,9 +1,9 @@
 import Foundation
 
-/// Adds and removes Gobbl's hooks in Claude Code's settings.json and Codex's
-/// hooks.json (both use the same hook format) without disturbing anything else
-/// in those files. Pure functions over the file contents so they can be tested;
-/// the app does the I/O.
+/// Adds and removes Gobbl's hooks in Claude Code's settings.json, Codex's
+/// hooks.json, and Grok's ~/.grok/hooks/gobbl.json (all use the same hook
+/// format) without disturbing anything else in those files. Pure functions
+/// over the file contents so they can be tested; the app does the I/O.
 public enum AgentHookConfig {
     /// Every command Gobbl installs contains this, which is how we find our own entries.
     public static let marker = "gobbl-agent"
@@ -13,6 +13,10 @@ public enum AgentHookConfig {
     public static let claudeEvents = ["SessionStart", "UserPromptSubmit", "PreToolUse", "Notification", "Stop", "SessionEnd"]
     /// Codex has the same lifecycle hooks, minus Notification.
     public static let codexEvents = ["SessionStart", "UserPromptSubmit", "PreToolUse", "Stop", "SessionEnd"]
+    /// Grok has Claude's events plus PostToolUse (thinking vs coding) and the
+    /// interrupt/error stops. No PermissionRequest hook, so no notch approvals.
+    public static let grokEvents = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+                                    "Notification", "Stop", "StopFailure", "StopCancelled", "SessionEnd"]
 
     public static func claudeCommand(helper: String) -> String {
         "/usr/bin/perl \"\(helper)\" claude"
@@ -20,6 +24,10 @@ public enum AgentHookConfig {
 
     public static func codexCommand(helper: String) -> String {
         "/usr/bin/perl \"\(helper)\" codex"
+    }
+
+    public static func grokCommand(helper: String) -> String {
+        "/usr/bin/perl \"\(helper)\" grok"
     }
 
     public enum ConfigError: Error, Equatable {
@@ -60,6 +68,24 @@ public enum AgentHookConfig {
         status(data, events: codexEvents)
     }
 
+    // MARK: Grok
+
+    /// Returns ~/.grok/hooks/gobbl.json contents with Gobbl's hooks installed.
+    /// Grok's Stop is a gate, so these run with a short timeout and no `async`
+    /// flag (Grok may not honor it); gobbl-agent exits 0 with empty stdout.
+    public static func installGrok(into data: Data?, helper: String) throws -> Data {
+        try install(into: data, events: grokEvents, command: grokCommand(helper: helper),
+                    approvals: false, async: false, timeout: 5)
+    }
+
+    public static func uninstallGrok(from data: Data?) throws -> Data {
+        try uninstall(from: data)
+    }
+
+    public static func grokStatus(_ data: Data?) -> (connected: Bool, approvals: Bool) {
+        status(data, events: grokEvents)
+    }
+
     /// Older Gobbl versions connected Codex through a `notify` line in config.toml,
     /// which only reported finished turns. Hooks replace it.
     public static func hasLegacyCodexNotify(_ configToml: String) -> Bool {
@@ -77,12 +103,16 @@ public enum AgentHookConfig {
 
     // MARK: Shared
 
-    private static func install(into data: Data?, events: [String], command: String, approvals: Bool, approvalTimeout: Int) throws -> Data {
+    private static func install(into data: Data?, events: [String], command: String, approvals: Bool,
+                                approvalTimeout: Int = 45, async: Bool = true, timeout: Int? = nil) throws -> Data {
         var root = try parse(data)
         var hooks = strip(root["hooks"] as? [String: Any] ?? [:])
         for event in events {
             var groups = hooks[event] as? [[String: Any]] ?? []
-            groups.append(["hooks": [["type": "command", "command": command, "async": true]]])
+            var handler: [String: Any] = ["type": "command", "command": command]
+            if async { handler["async"] = true }
+            if let timeout { handler["timeout"] = timeout }
+            groups.append(["hooks": [handler]])
             hooks[event] = groups
         }
         if approvals {

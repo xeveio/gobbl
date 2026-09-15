@@ -50,6 +50,38 @@ import Testing
         #expect(claude("nope") == nil)
         #expect(claude(#"{"hook_event_name":"PreCompact","session_id":"s"}"#) == nil)
     }
+
+    @Test func parsesGrokHooks() {
+        func grok(_ json: String) -> AgentEvent? { AgentEvent.parse(source: .grok, json: Data(json.utf8)) }
+        let prompt = grok(#"{"hookEventName":"user_prompt_submit","hook_event_name":"UserPromptSubmit","sessionId":"01a0","cwd":"/src/app"}"#)
+        #expect(prompt?.kind == .promptSubmitted)
+        #expect(prompt?.source == .grok)
+        #expect(prompt?.sessionID == "01a0")
+        #expect(prompt?.cwd == "/src/app")
+        #expect(grok(#"{"hook_event_name":"PreToolUse","sessionId":"01a0","toolName":"run_terminal_command","toolInput":{"command":"npm test"}}"#)?.kind
+                == .toolUse("run_terminal_command"))
+        #expect(grok(#"{"hookEventName":"post_tool_use","sessionId":"01a0","toolName":"read_file"}"#)?.kind == .toolFinished)
+        #expect(grok(#"{"hook_event_name":"Stop","sessionId":"01a0","reason":"end_turn","lastAssistantMessage":"All done"}"#)?.kind
+                == .turnDone("All done"))
+        #expect(grok(#"{"hook_event_name":"Stop","sessionId":"01a0","reason":"shutdown"}"#)?.kind == .sessionEnd)
+        #expect(grok(#"{"hook_event_name":"StopCancelled","sessionId":"01a0","reason":"user_interrupt"}"#)?.kind == .turnAborted)
+        #expect(grok(#"{"hook_event_name":"StopFailure","sessionId":"01a0","error":"rate_limit"}"#)?.kind == .turnAborted)
+        #expect(grok(#"{"hook_event_name":"Notification","sessionId":"01a0","notificationType":"permission_prompt"}"#)?.kind
+                == .needsInput("Needs your permission"))
+        #expect(grok(#"{"hook_event_name":"Notification","sessionId":"01a0","notificationType":"idle_prompt"}"#) == nil)
+        #expect(grok(#"{"hook_event_name":"SessionEnd","sessionId":"01a0","subagentType":"explore"}"#) == nil)
+        #expect(grok(#"{"hook_event_name":"PreToolUse","sessionId":"child","toolName":"grep","subagentType":"explore"}"#) == nil)
+    }
+
+    @Test func grokPayloadViaClaudeHelperIsStillGrok() {
+        // Grok scans ~/.claude/settings.json, so gobbl-agent is called with "claude".
+        let json = #"{"hookEventName":"user_prompt_submit","hook_event_name":"UserPromptSubmit","sessionId":"01a0","cwd":"/src/app"}"#
+        let e = AgentEvent.parse(source: .claude, json: Data(json.utf8))
+        #expect(e?.source == .grok)
+        #expect(e?.kind == .promptSubmitted)
+        #expect(AgentEvent.parse(source: .claude, json: Data(#"{"hook_event_name":"UserPromptSubmit","session_id":"s1"}"#.utf8))?.source
+                == .claude)
+    }
 }
 
 @Suite struct AgentTrackerTests {
@@ -68,6 +100,7 @@ import Testing
         #expect(t.sessions[0].hostApp == "com.mitchellh.ghostty")
         #expect(t.apply(ev(.turnDone("ok")), now: t0) == .done("ok"))
         #expect(!t.anyWorking)
+        #expect(t.apply(ev(.turnDone("ok")), now: t0) == .none)
     }
 
     @Test func thinkingVersusCoding() {
@@ -113,6 +146,23 @@ import Testing
         t.apply(ev(.promptSubmitted), now: t0)
         t.apply(ev(.sessionEnd), now: t0)
         #expect(t.sessions.isEmpty)
+    }
+
+    @Test func grokEventRelabelsAClaudeRow() {
+        var t = AgentTracker()
+        t.apply(AgentEvent(source: .claude, sessionID: "s1", cwd: "/src/app", kind: .promptSubmitted), now: t0)
+        #expect(t.sessions[0].source == .claude)
+        t.apply(AgentEvent(source: .grok, sessionID: "s1", cwd: "/src/app", kind: .toolUse("read_file")), now: t0)
+        #expect(t.sessions[0].source == .grok)
+    }
+
+    @Test func abortedTurnGoesIdleWithoutCheering() {
+        var t = AgentTracker()
+        t.apply(ev(.promptSubmitted), now: t0)
+        t.apply(ev(.toolUse("Edit")), now: t0)
+        #expect(t.apply(ev(.turnAborted), now: t0) == .none)
+        #expect(!t.anyWorking)
+        #expect(t.sessions[0].state == .idle)
     }
 }
 
@@ -176,6 +226,25 @@ import Testing
         let removed = try AgentHookConfig.uninstallCodex(from: installed)
         #expect(Array(try #require(try object(removed)["hooks"] as? [String: Any]).keys) == ["Stop"])
         #expect(AgentHookConfig.codexStatus(removed) == (false, false))
+    }
+
+    @Test func grokHooks() throws {
+        let existing = #"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]}}"#
+        let installed = try AgentHookConfig.installGrok(into: Data(existing.utf8), helper: helper)
+        let hooks = try #require(try object(installed)["hooks"] as? [String: Any])
+        #expect(Set(hooks.keys) == Set(AgentHookConfig.grokEvents))
+        #expect(hooks["PermissionRequest"] == nil)
+        #expect((hooks["Stop"] as? [[String: Any]])?.count == 2) // theirs + ours
+        let ours = try #require((hooks["PreToolUse"] as? [[String: Any]])?.first?["hooks"] as? [[String: Any]])
+        #expect(ours.first?["command"] as? String == "/usr/bin/perl \"\(helper)\" grok")
+        #expect(ours.first?["async"] as? Bool == nil)
+        #expect((ours.first?["timeout"] as? Int) == 5 || (ours.first?["timeout"] as? NSNumber)?.intValue == 5)
+        #expect(AgentHookConfig.grokStatus(installed) == (true, false))
+        #expect(try AgentHookConfig.installGrok(into: installed, helper: helper) == installed)
+
+        let removed = try AgentHookConfig.uninstallGrok(from: installed)
+        #expect(Array(try #require(try object(removed)["hooks"] as? [String: Any]).keys) == ["Stop"])
+        #expect(AgentHookConfig.grokStatus(removed) == (false, false))
     }
 
     @Test func legacyCodexNotifyIsRemovedButOthersStay() {
