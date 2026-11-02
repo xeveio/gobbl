@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -21,3 +22,33 @@ jobs:
           xcodegen generate
           xcodebuild -project Gobbl.xcodeproj -scheme Gobbl -configuration Debug \
             -derivedDataPath build/DD CODE_SIGNING_ALLOWED=NO build
+
+  worker:
+    # The AI worker is the only part of the project with npm dependencies, and
+    # nothing built or tested it, so its audit gate lives here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: server/ai-worker
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: server/ai-worker/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # Fails on high/critical advisories in the lockfile; lower ones still print.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Test
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
